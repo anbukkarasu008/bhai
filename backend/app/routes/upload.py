@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File
 from backend.app.services.pdf_service import save_pdf, extract_text_from_pdf
-from backend.app.services.text_service import clean_text,chunk_text
+from backend.app.services.text_service import clean_text
+from backend.app.services.chunk_service import chunk_text
 from backend.app.services.embedding_service import generate_embeddings
 from backend.app.services.embedding_service import (
     generate_embeddings,
@@ -11,7 +12,7 @@ from backend.app.services.embedding_service import (
 
 router = APIRouter()
 
-
+    
 @router.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
 
