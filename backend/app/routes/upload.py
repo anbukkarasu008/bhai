@@ -9,10 +9,9 @@ from backend.app.services.embedding_service import (
     save_faiss_index,
     load_faiss_index
 )
-
+from backend.app.services.retrieval_service import save_chunks
 router = APIRouter()
 
-    
 @router.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
 
@@ -28,6 +27,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     cleaned_text = clean_text(pdf_text)
 
     chunks = chunk_text(cleaned_text)
+    save_chunks(chunks, "backend/vector_store/chunks.json")
     embeddings = generate_embeddings(chunks)
     index = create_faiss_index(embeddings)
     save_faiss_index(index, "backend/vector_store/faiss_index.bin")

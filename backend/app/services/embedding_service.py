@@ -40,3 +40,11 @@ def load_faiss_index(file_path: str):
     Load the FAISS index from disk.
     """
     return faiss.read_index(file_path)
+
+def generate_query_embedding(question: str):
+    """
+    Generate embedding for the user's question.
+    """
+    embedding = model.encode([question])
+
+    return embedding.astype("float32")
