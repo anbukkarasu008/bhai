@@ -29,17 +29,17 @@ def create_faiss_index(embeddings):
     return index
 
 
-def save_faiss_index(index, file_path: str):
+def save_faiss_index(index, file_path):
     """
     Save the FAISS index to disk.
     """
-    faiss.write_index(index, file_path)
+    faiss.write_index(index, str(file_path))
 
-def load_faiss_index(file_path: str):
+def load_faiss_index(file_path):
     """
     Load the FAISS index from disk.
     """
-    return faiss.read_index(file_path)
+    return faiss.read_index(str(file_path))
 
 def generate_query_embedding(question: str):
     """
