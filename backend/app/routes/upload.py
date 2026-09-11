@@ -1,5 +1,7 @@
+from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, HTTPException
+
 from backend.app.config import (
     CHUNKS_FILE,
     FAISS_INDEX_FILE
@@ -11,14 +13,12 @@ from backend.app.services.pdf_service import (
 )
 
 from backend.app.services.text_service import clean_text
-
 from backend.app.services.chunk_service import chunk_text
 
 from backend.app.services.embedding_service import (
     generate_embeddings,
     create_faiss_index,
-    save_faiss_index,
-    load_faiss_index
+    save_faiss_index
 )
 
 from backend.app.services.retrieval_service import (
@@ -31,85 +31,48 @@ router = APIRouter()
 
 
 @router.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...)
+):
+    """
+    Upload a PDF, extract and clean its text,
+    create chunks and embeddings, and rebuild
+    the FAISS index using all uploaded documents.
+    """
 
     # --------------------------------------------------
-    # Step 1: Check file type
+    # Step 1: Validate file type
     # --------------------------------------------------
 
     if file.content_type != "application/pdf":
-        return {
-            "status": "error",
-            "message": "Only PDF files are allowed."
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are allowed."
+        )
+
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="A valid PDF filename is required."
+        )
+
+    # Keep only the filename component.
+    filename = Path(file.filename).name
 
     try:
 
         # --------------------------------------------------
-        # Step 2: Save uploaded PDF
+        # Step 2: Check existing chunks
         # --------------------------------------------------
-
-        file_path = save_pdf(file)
-
-        # --------------------------------------------------
-        # Step 3: Extract PDF text
-        # --------------------------------------------------
-
-        pdf_text = extract_text_from_pdf(file_path)
-
-        if not pdf_text.strip():
-            return {
-                "status": "error",
-                "message": "The PDF does not contain readable text."
-            }
-
-        # --------------------------------------------------
-        # Step 4: Clean extracted text
-        # --------------------------------------------------
-
-        cleaned_text = clean_text(pdf_text)
-
-        if not cleaned_text.strip():
-            return {
-                "status": "error",
-                "message": "No usable text was found in the PDF."
-            }
-
-        # --------------------------------------------------
-        # Step 5: Create chunks for the new PDF
-        # --------------------------------------------------
-
-        raw_chunks = chunk_text(cleaned_text)
-
-        if not raw_chunks:
-            return {
-                "status": "error",
-                "message": "Unable to create text chunks from the PDF."
-            }
-
-        # Add document metadata to every chunk
-        new_chunks = [
-            {
-                "filename": file.filename,
-                "text": chunk
-            }
-            for chunk in raw_chunks
-        ]
-
-        # --------------------------------------------------
-        # Step 6: Load existing chunks
-        # --------------------------------------------------
-
-        chunks_path = CHUNKS_FILE
 
         try:
-            existing_chunks = load_chunks(chunks_path)
+            existing_chunks = load_chunks(CHUNKS_FILE)
 
         except FileNotFoundError:
             existing_chunks = []
 
         # --------------------------------------------------
-        # Step 7: Check whether this PDF already exists
+        # Step 3: Check for duplicate document
         # --------------------------------------------------
 
         existing_filenames = {
@@ -119,29 +82,85 @@ async def upload_pdf(file: UploadFile = File(...)):
             and "filename" in chunk
         }
 
-        if file.filename in existing_filenames:
-            return {
-                "status": "error",
-                "message": f"{file.filename} has already been uploaded."
-            }
+        if filename in existing_filenames:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{filename} has already been uploaded."
+            )
 
         # --------------------------------------------------
-        # Step 8: Combine old + new chunks
+        # Step 4: Save uploaded PDF
+        # --------------------------------------------------
+
+        file.filename = filename
+
+        file_path = save_pdf(file)
+
+        # --------------------------------------------------
+        # Step 5: Extract PDF text
+        # --------------------------------------------------
+
+        pdf_text = extract_text_from_pdf(file_path)
+
+        if not pdf_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="The PDF does not contain readable text."
+            )
+
+        # --------------------------------------------------
+        # Step 6: Clean extracted text
+        # --------------------------------------------------
+
+        cleaned_text = clean_text(pdf_text)
+
+        if not cleaned_text:
+            raise HTTPException(
+                status_code=400,
+                detail="No usable text was found in the PDF."
+            )
+
+        # --------------------------------------------------
+        # Step 7: Create chunks
+        # --------------------------------------------------
+
+        raw_chunks = chunk_text(cleaned_text)
+
+        if not raw_chunks:
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to create text chunks from the PDF."
+            )
+
+        # --------------------------------------------------
+        # Step 8: Add document metadata
+        # --------------------------------------------------
+
+        new_chunks = [
+            {
+                "filename": filename,
+                "text": chunk
+            }
+            for chunk in raw_chunks
+        ]
+
+        # --------------------------------------------------
+        # Step 9: Combine existing and new chunks
         # --------------------------------------------------
 
         all_chunks = existing_chunks + new_chunks
 
         # --------------------------------------------------
-        # Step 9: Save all chunks
+        # Step 10: Save chunks
         # --------------------------------------------------
 
         save_chunks(
             all_chunks,
-            chunks_path
+            CHUNKS_FILE
         )
 
         # --------------------------------------------------
-        # Step 10: Extract text for embeddings
+        # Step 11: Generate embeddings
         # --------------------------------------------------
 
         texts = [
@@ -149,62 +168,48 @@ async def upload_pdf(file: UploadFile = File(...)):
             for chunk in all_chunks
         ]
 
-        # --------------------------------------------------
-        # Step 11: Generate embeddings
-        # --------------------------------------------------
-
         embeddings = generate_embeddings(texts)
 
         # --------------------------------------------------
         # Step 12: Create FAISS index
         # --------------------------------------------------
 
-        index = create_faiss_index(embeddings)
+        index = create_faiss_index(
+            embeddings
+        )
 
         # --------------------------------------------------
         # Step 13: Save FAISS index
         # --------------------------------------------------
 
-        faiss_path = FAISS_INDEX_FILE
-
         save_faiss_index(
             index,
-            faiss_path
+            FAISS_INDEX_FILE
         )
 
         # --------------------------------------------------
-        # Step 14: Load FAISS index again
-        # --------------------------------------------------
-
-        loaded_index = load_faiss_index(
-            faiss_path
-        )
-
-        # --------------------------------------------------
-        # Step 15: Return success response
+        # Step 14: Return success response
         # --------------------------------------------------
 
         return {
             "status": "success",
-            "filename": file.filename,
+            "filename": filename,
             "new_chunks": len(new_chunks),
             "total_chunks": len(all_chunks),
             "embedding_dimension": len(embeddings[0]),
             "vectors_stored": index.ntotal,
-            "loaded_vectors": loaded_index.ntotal,
-            "faiss_index": str(faiss_path),
             "message": (
-                "PDF added successfully and FAISS index "
-                "rebuilt using all documents."
+                "PDF added successfully and the FAISS "
+                "index was rebuilt using all documents."
             )
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
 
-        print("Upload processing error:", e)
+    except Exception as exc:
 
-        return {
-            "status": "error",
-            "message": "Unable to process the uploaded PDF."
-        }
-
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process the uploaded PDF."
+        ) from exc

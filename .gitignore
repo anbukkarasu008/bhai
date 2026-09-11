@@ -5,4 +5,5 @@ __pycache__/
 
 backend/vector_store/*_backup.json
 backend/vector_store/*_backup.bin
+
 test.txt

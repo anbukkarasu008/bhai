@@ -8,9 +8,10 @@ from backend.app.services.embedding_service import (
     save_faiss_index
 )
 from backend.app.services.retrieval_service import save_chunks
+from backend.app.config import UPLOAD_FOLDER
 
 
-UPLOAD_DIR = "backend/uploads"
+UPLOAD_DIR = UPLOAD_FOLDER
 VECTOR_DIR = "backend/vector_store"
 
 CHUNKS_PATH = os.path.join(

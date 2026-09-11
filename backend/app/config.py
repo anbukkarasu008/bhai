@@ -32,20 +32,38 @@ FAISS_INDEX_FILE = VECTOR_STORE_FOLDER / "faiss_index.bin"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-GROQ_MODEL = "openai/gpt-oss-20b"
+GROQ_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "openai/gpt-oss-20b"
+)
 
 
 # --------------------------------------------------
 # Retrieval configuration
 # --------------------------------------------------
 
-TOP_K = 3
+TOP_K = int(
+    os.getenv(
+        "TOP_K",
+        "3"
+    )
+)
 
-RELEVANCE_THRESHOLD = 1.5
+RELEVANCE_THRESHOLD = float(
+    os.getenv(
+        "RELEVANCE_THRESHOLD",
+        "1.8"
+    )
+)
 
 
 # --------------------------------------------------
 # Conversation configuration
 # --------------------------------------------------
 
-MAX_HISTORY_MESSAGES = 10
+MAX_HISTORY_MESSAGES = int(
+    os.getenv(
+        "MAX_HISTORY_MESSAGES",
+        "10"
+    )
+)

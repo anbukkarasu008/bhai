@@ -1,28 +1,64 @@
-from pathlib import Path
+
 import shutil
+from pathlib import Path
+
 import fitz
 
-UPLOAD_FOLDER = Path("backend/uploads")
-UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+from backend.app.config import UPLOAD_FOLDER
+
+
+# --------------------------------------------------
+# Ensure upload directory exists
+# --------------------------------------------------
+
+UPLOAD_FOLDER.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
 def save_pdf(file):
-    file_path = UPLOAD_FOLDER / file.filename
+    """
+    Save an uploaded PDF to the configured upload directory.
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    The filename is expected to be validated and sanitized
+    by the upload route before reaching this service.
+    """
+
+    filename = Path(file.filename).name
+
+    file_path = UPLOAD_FOLDER / filename
+
+    with open(
+        file_path,
+        "wb"
+    ) as buffer:
+
+        shutil.copyfileobj(
+            file.file,
+            buffer
+        )
 
     return file_path
 
 
 def extract_text_from_pdf(pdf_path):
-    text = ""
+    """
+    Extract text from all pages of a PDF document.
+    """
 
-    document = fitz.open(pdf_path)
+    text_parts = []
 
-    for page in document:
-        text += page.get_text()
+    with fitz.open(pdf_path) as document:
 
-    document.close()
+        for page in document:
 
-    return text
+            page_text = page.get_text()
+
+            if page_text:
+                text_parts.append(
+                    page_text
+                )
+
+    return "\n".join(text_parts)
+

@@ -1,9 +1,10 @@
-import faiss
 import json
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from backend.app.services.embedding_service import load_faiss_index
+import logging
 
+from backend.app.services.embedding_service import (
+    load_faiss_index,
+    generate_query_embedding
+)
 
 from backend.app.config import (
     TOP_K,
@@ -12,15 +13,18 @@ from backend.app.config import (
     FAISS_INDEX_FILE
 )
 
+logger = logging.getLogger(__name__)
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
 
-
-def search_index(index, query_embedding, top_k=3):
+def search_index(index, query_embedding, top_k=TOP_K):
     """
     Search the FAISS index and return the closest matching chunks.
     """
-    distances, indices = index.search(query_embedding, top_k)
+
+    distances, indices = index.search(
+        query_embedding,
+        top_k
+    )
 
     return distances, indices
 
@@ -29,7 +33,13 @@ def save_chunks(chunks, file_path):
     """
     Save all chunks into a JSON file.
     """
-    with open(file_path, "w", encoding="utf-8") as file:
+
+    with open(
+        file_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
         json.dump(
             chunks,
             file,
@@ -42,14 +52,20 @@ def load_chunks(file_path):
     """
     Load all saved chunks from JSON.
     """
-    with open(file_path, "r", encoding="utf-8") as file:
+
+    with open(
+        file_path,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
         return json.load(file)
 
 
-
-
-
-def retrieve_context(question: str, top_k: int = TOP_K):
+def retrieve_context(
+    question: str,
+    top_k: int = TOP_K
+):
     """
     Retrieve relevant chunks from FAISS.
 
@@ -66,8 +82,14 @@ def retrieve_context(question: str, top_k: int = TOP_K):
         }
 
     Raises:
+        ValueError: If top_k is invalid.
         RuntimeError: If retrieval infrastructure fails.
     """
+
+    if top_k <= 0:
+        raise ValueError(
+            "top_k must be greater than zero."
+        )
 
     try:
 
@@ -75,11 +97,9 @@ def retrieve_context(question: str, top_k: int = TOP_K):
         # Step 1: Generate embedding for the question
         # --------------------------------------------------
 
-        query_embedding = model.encode([question])
-
-        query_embedding = np.array(
-            query_embedding
-        ).astype("float32")
+        query_embedding = generate_query_embedding(
+            question
+        )
 
         # --------------------------------------------------
         # Step 2: Load FAISS index
@@ -99,8 +119,12 @@ def retrieve_context(question: str, top_k: int = TOP_K):
             top_k=top_k
         )
 
-        print("FAISS distances:", distances)
-        print("FAISS indices:", indices)
+        
+
+        logger.debug("FAISS distances: %s", distances)
+
+        logger.debug("FAISS indices: %s", indices)
+        
 
         # --------------------------------------------------
         # Step 4: Load chunks
@@ -110,15 +134,23 @@ def retrieve_context(question: str, top_k: int = TOP_K):
             CHUNKS_FILE
         )
 
+        # --------------------------------------------------
+        # Step 5: Validate vector/chunk consistency
+        # --------------------------------------------------
+
+        if index.ntotal != len(chunks):
+            raise RuntimeError(
+                "FAISS index and chunk store are out of sync."
+            )
+
         retrieved_chunks = []
 
         sources = []
 
-        # Keep track of duplicate text
         seen_chunks = set()
 
         # --------------------------------------------------
-        # Step 5: Process FAISS results
+        # Step 6: Process FAISS results
         # --------------------------------------------------
 
         for distance, idx in zip(
@@ -127,44 +159,41 @@ def retrieve_context(question: str, top_k: int = TOP_K):
         ):
 
             if idx == -1:
-                print(
-                    f"Rejected chunk {idx}"
-                )
+                logger.debug("Rejected chunk %s", idx)
+
                 continue
 
             if distance > RELEVANCE_THRESHOLD:
-                print(
-                    f"Rejected chunk {idx} "
-                    f"with distance {distance}"
-                )
+                logger.debug(
+    "Rejected chunk %s with distance %.4f",
+    idx,
+    distance
+)
+                
                 continue
 
             chunk = chunks[idx]
 
-            # Extract text from metadata structure
             chunk_text = chunk["text"]
 
-            # Avoid duplicate chunks
             if chunk_text in seen_chunks:
-
-                print(
-                    f"Skipped duplicate chunk {idx}"
-                )
-
+                logger.debug(
+    "Skipped duplicate chunk %s",
+    idx
+)
                 continue
 
-            print(
-                f"Accepted chunk {idx} "
-                f"from {chunk['filename']} "
-                f"with distance {distance}"
-            )
+            logger.debug(
+    "Accepted chunk %s from %s with distance %.4f",
+    idx,
+    chunk["filename"],
+    distance
+)
 
-            # Add text to context
             retrieved_chunks.append(
                 chunk_text
             )
 
-            # Add source metadata
             sources.append(
                 {
                     "filename": chunk["filename"],
@@ -173,10 +202,12 @@ def retrieve_context(question: str, top_k: int = TOP_K):
                 }
             )
 
-            seen_chunks.add(chunk_text)
+            seen_chunks.add(
+                chunk_text
+            )
 
         # --------------------------------------------------
-        # Step 6: Combine chunks
+        # Step 7: Combine retrieved chunks
         # --------------------------------------------------
 
         context = "\n\n".join(
@@ -184,7 +215,7 @@ def retrieve_context(question: str, top_k: int = TOP_K):
         )
 
         # --------------------------------------------------
-        # Step 7: Return context + source metadata
+        # Step 8: Return context and source metadata
         # --------------------------------------------------
 
         return {
@@ -194,7 +225,8 @@ def retrieve_context(question: str, top_k: int = TOP_K):
 
     except Exception as e:
 
-        print("Retrieval Error:", e)
+        logger.exception("Retrieval failed")
+
 
         raise RuntimeError(
             "Unable to retrieve information from the document store."

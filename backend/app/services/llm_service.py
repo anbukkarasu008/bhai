@@ -5,8 +5,6 @@ from backend.app.config import (
     GROQ_MODEL
 )
 
-from backend.app.services.memory_service import get_history
-
 
 # --------------------------------------------------
 # Groq client
@@ -17,121 +15,144 @@ client = Groq(
 )
 
 
+# --------------------------------------------------
+# Constants
+# --------------------------------------------------
+
+DOCUMENT_NOT_FOUND_MESSAGE = (
+    "I don't know based on the provided document."
+)
+
+
+# --------------------------------------------------
+# Generate response
+# --------------------------------------------------
+
 def generate_response(
     question: str,
     context: str,
     session_id: str
 ):
     """
-    Generate an answer using the retrieved document context
-    and the conversation history for the current session.
+    Generate an answer using only the retrieved
+    document context.
+
+    The conversation history is handled by the
+    query rewriting component before retrieval.
     """
 
     # --------------------------------------------------
-    # Step 1: Check whether retrieval returned context
+    # Step 1: Validate retrieved context
     # --------------------------------------------------
 
-    if not context.strip():
-        return "I don't know based on the provided document."
+    if not context or not context.strip():
+        return DOCUMENT_NOT_FOUND_MESSAGE
 
     try:
 
         # --------------------------------------------------
-        # Step 2: System instructions
+        # Step 2: Build system instructions
         # --------------------------------------------------
 
         messages = [
-    {
-        "role": "system",
-        "content": (
-            "You are a document question-answering assistant.\n\n"
+            {
+                "role": "system",
+                "content": (
+                    "You are a document question-answering assistant.\n\n"
 
-            "Your job is to answer the CURRENT QUESTION using "
-            "ONLY the CURRENT RETRIEVED CONTEXT.\n\n"
+                    "Your ONLY source of factual information is the "
+                    "CURRENT RETRIEVED DOCUMENT.\n\n"
 
-            "IMPORTANT RULES:\n"
-            "1. The CURRENT RETRIEVED CONTEXT is the only source "
-            "of factual information.\n"
+                    "STRICT RULES:\n"
 
-            "2. Do NOT use your own knowledge or outside information.\n"
+                    "1. Answer the CURRENT QUESTION using ONLY the "
+                    "CURRENT RETRIEVED DOCUMENT.\n\n"
 
-            "3. Do NOT use previous assistant answers as factual "
-            "evidence.\n"
+                    "2. Do NOT use your own knowledge or outside "
+                    "information.\n\n"
 
-            "4. Conversation history may ONLY help resolve "
-            "references such as 'it', 'they', 'this', or 'that'.\n"
+                    "3. Do NOT invent, guess, or assume information.\n\n"
 
-            "5. If the CURRENT RETRIEVED CONTEXT contains enough "
-            "information to answer the CURRENT QUESTION, answer "
-            "using that information.\n"
+                    "4. If the CURRENT RETRIEVED DOCUMENT contains "
+                    "enough information to answer the question, "
+                    "answer directly using that information.\n\n"
 
-            "6. If the CURRENT RETRIEVED CONTEXT does not contain "
-            "enough information, respond exactly with:\n"
-            "I don't know based on the provided document.\n"
+                    "5. If the CURRENT RETRIEVED DOCUMENT does not "
+                    "contain enough information, respond exactly with:\n"
+                    f"{DOCUMENT_NOT_FOUND_MESSAGE}\n\n"
 
-            "7. Do not guess, assume, or invent information.\n"
+                    "6. Keep the answer clear and directly related "
+                    "to the CURRENT QUESTION.\n\n"
 
-            "8. Keep the answer clear and directly related to the "
-            "CURRENT QUESTION."
-        ),
-    }
-]
-
-        # --------------------------------------------------
-        # Step 3: Get conversation history
-        # --------------------------------------------------
-
-        history = get_history(session_id)
+                    "7. Do NOT mention the retrieval process unless "
+                    "the user asks about it."
+                )
+            }
+        ]
 
         # --------------------------------------------------
-        # Step 4: Add conversation history
+        # Step 3: Add current context and question
         # --------------------------------------------------
 
-        messages.extend(history)
-
-        # --------------------------------------------------
-        # Step 5: Add current question + retrieved context
-        # --------------------------------------------------
         messages.append(
-    {
-        "role": "user",
-        "content": f"""
-        ==============================
-        CURRENT RETRIEVED DOCUMENT
-        ==============================
+            {
+                "role": "user",
+                "content": (
+                    "==============================\n"
+                    "CURRENT RETRIEVED DOCUMENT\n"
+                    "==============================\n\n"
+                    f"{context}\n\n"
 
-        {context}
+                    "==============================\n"
+                    "CURRENT QUESTION\n"
+                    "==============================\n\n"
+                    f"{question}\n\n"
 
-        ==============================
-        CURRENT QUESTION
-        ==============================
+                    "==============================\n"
+                    "ANSWERING INSTRUCTION\n"
+                    "==============================\n\n"
 
-        {question}
-
-        ==============================
-        ANSWERING INSTRUCTION
-        ==============================
-        Answer the CURRENT QUESTION using only the CURRENT RETRIEVED DOCUMENT.
-        """
-    }
-)
-         
-        # Step 6: Generate response
-        # --------------------------------------------------
-
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages
+                    "Answer the CURRENT QUESTION using ONLY "
+                    "the CURRENT RETRIEVED DOCUMENT."
+                )
+            }
         )
 
         # --------------------------------------------------
-        # Step 7: Return answer
+        # Step 4: Call Groq
+        # --------------------------------------------------
+        
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            temperature=0
+        )
+
+        
+
+        # --------------------------------------------------
+        # Step 5: Extract answer
         # --------------------------------------------------
 
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content
+
+        if not answer or not answer.strip():
+            raise RuntimeError(
+                "LLM returned an empty response."
+            )
+
+        return answer.strip()
+
+    except RuntimeError:
+        raise
 
     except Exception as e:
 
-        print("Groq Error:", e)
+        print(
+            "Groq Error:",
+            e
+        )
 
-        return "Unable to generate an answer at this time."
+        raise RuntimeError(
+            "Unable to generate an answer from the language model."
+        ) from e
